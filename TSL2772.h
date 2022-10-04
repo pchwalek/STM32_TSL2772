@@ -52,15 +52,18 @@ typedef enum {
 
 		bool enableALS_GainScaling(bool state);
 
+//		bool enableAutoInc(bool state);
 		bool enableALS(bool state);
 		bool powerOn(bool state);
+
+		bool reset(void);
 
 		void readALS_data();
 		uint32_t getLux();
 
-
-	protected:
 		bool _init();
+	protected:
+
 		I2C_HandleTypeDef *i2c_han = NULL;///< Pointer to I2C bus interface
 		uint8_t i2c_addr = 0;
 
@@ -80,7 +83,7 @@ typedef enum {
 		uint8_t checkRegisterBit(uint16_t reg, uint8_t pos);
 		uint8_t modifyBitInByte(uint8_t var, uint8_t value, uint8_t pos);
 		bool modifyRegisterMultipleBit(uint16_t reg, uint8_t value, uint8_t pos, uint8_t bits);
-
+		bool readRegisterBytes(uint16_t mem_addr, uint8_t *data, uint16_t num_bytes);
 		bool readRegister(uint16_t mem_addr, uint8_t *dest, uint16_t size);
 		uint8_t readRegisterByte(uint16_t mem_addr);
 

@@ -93,7 +93,9 @@
 #define CTRL_REG_AGAIN_16X				0x02
 #define CTRL_REG_AGAIN_120X				0x03
 
+#define TSL27721_ALSPROX_DEV_ID			0x30
 
+#define TSL27721_CMD_NORMAL				CMD_REG_W | CMD_REG_TYPE_AUTO_INC
 /**
  * @brief Construct a new TSL2772::TSL2772 object
  *
@@ -130,16 +132,35 @@ bool TSL2772::begin(uint8_t i2c_address, I2C_HandleTypeDef *i2c_handle) {
  *   @returns True if chip identified and initialized
  */
 bool TSL2772::_init() {
+	uint8_t devid = readRegisterByte(TSL2722_ID_REG | TSL27721_CMD_NORMAL);
 
 	// configure register autoincrement
-	uint8_t data = CMD_REG_W | CMD_REG_TYPE_AUTO_INC;
-	HAL_I2C_Master_Transmit(i2c_han, i2c_addr, &data, 1, 10);
+	if (devid != TSL27721_ALSPROX_DEV_ID) return false;
+
+	reset();
 
 	return true;
 }
 
+bool TSL2772::reset(void) {
+	return writeRegisterByte(TSL2722_ENABLE_REG, 0);
+}
+
+
+//bool TSL2772::enableAutoInc(bool state) {
+//	uint8_t data = CMD_REG_W;
+//
+//	if(state) data |= CMD_REG_TYPE_AUTO_INC;
+//
+//	if(HAL_OK == HAL_I2C_Master_Transmit(i2c_han, i2c_addr, &data, 1, 10)){
+//		return true;
+//	}else{
+//		return false;
+//	}
+//}
+
 bool TSL2772::enableALS(bool state) {
-	uint8_t enable_reg_data = readRegisterByte(TSL2722_ENABLE_REG);
+	uint8_t enable_reg_data = readRegisterByte(TSL2722_ENABLE_REG | TSL27721_CMD_NORMAL);
 
 	if(state) enable_reg_data |= EN_REG_AEN;
 	else enable_reg_data &= !EN_REG_AEN;
@@ -148,7 +169,7 @@ bool TSL2772::enableALS(bool state) {
 }
 
 bool TSL2772::enableALS_GainScaling(bool state){
-	uint8_t config_reg_data = readRegisterByte(TSL2722_CONFIG_REG);
+	uint8_t config_reg_data = readRegisterByte(TSL2722_CONFIG_REG | TSL27721_CMD_NORMAL);
 
 	if(state){
 		config_reg_data |= CONFIG_REG_ALS_GAIN_SCALE_0_16;
@@ -163,19 +184,20 @@ bool TSL2772::enableALS_GainScaling(bool state){
 }
 
 bool TSL2772::powerOn(bool state) {
-	uint8_t enable_reg_data = readRegisterByte(TSL2722_ENABLE_REG);
+	uint8_t enable_reg_data = readRegisterByte(TSL2722_ENABLE_REG | TSL27721_CMD_NORMAL);
 
 	if(state) enable_reg_data |= EN_REG_PON;
 	else enable_reg_data &= !EN_REG_PON;
 
-	return writeRegisterByte(TSL2722_ENABLE_REG, enable_reg_data);
+	writeRegisterByte(TSL2722_ENABLE_REG, enable_reg_data);
+
+	return 1;
 }
 
 bool TSL2772::setATIME(tsl2591IntegrationTime_t atime_value){
-	uint8_t ctrl_reg_val = readRegisterByte(TSL2722_CONTROL_REG) & 0xFC;
+	uint8_t atime_reg_val = readRegisterByte(TSL2722_ATIME_REG | TSL27721_CMD_NORMAL);
 
-	ctrl_reg_val &= 0xFC;
-	ctrl_reg_val |= atime_value;
+	atime_reg_val = atime_value;
 
 	switch(atime_value){
 	case TSL2722_INTEGRATIONTIME_2_73MS:
@@ -197,9 +219,14 @@ bool TSL2772::setATIME(tsl2591IntegrationTime_t atime_value){
 		break;
 	}
 
-	return writeRegisterByte(TSL2722_CONTROL_REG, ctrl_reg_val);
+	return writeRegisterByte(TSL2722_ATIME_REG, atime_reg_val);
 }
 bool TSL2772::setAGAIN(tsl2591Gain_t gain_value){
+
+	uint8_t ctrl_reg_val = readRegisterByte(TSL2722_CONTROL_REG  | TSL27721_CMD_NORMAL) & 0xFC;
+
+	ctrl_reg_val &= 0xFC;
+	ctrl_reg_val |= gain_value;
 
 	switch(gain_value){
 	case TSL2722_GAIN_1X:
@@ -220,18 +247,21 @@ bool TSL2772::setAGAIN(tsl2591Gain_t gain_value){
 
 	if(als_gain_scaler) als_gain *= 0.16;
 
-	return writeRegisterByte(TSL2722_ATIME_REG, gain_value);
+	return writeRegisterByte(TSL2722_CONTROL_REG, ctrl_reg_val);
 }
 
 tsl2591IntegrationTime_t TSL2772::getATIME(){
-	return (tsl2591IntegrationTime_t) readRegisterByte(TSL2722_ATIME_REG);
+	return (tsl2591IntegrationTime_t) readRegisterByte(TSL2722_ATIME_REG | TSL27721_CMD_NORMAL);
 }
 
 tsl2591Gain_t TSL2772::getAGAIN(){
-	return (tsl2591Gain_t) (readRegisterByte(TSL2722_CONTROL_REG) & 0xFC);
+	return (tsl2591Gain_t) (readRegisterByte(TSL2722_CONTROL_REG | TSL27721_CMD_NORMAL) & 0xFC);
 }
 
 uint32_t TSL2772::getLux(){
+
+	readALS_data(); // grab samples from sensor
+
 	float _CPL; // counters per lux
 	_CPL = (als_integration_time_ms * als_gain) / (_GA*60);
 	float Lux1, Lux2;
@@ -248,8 +278,14 @@ uint32_t TSL2772::getLux(){
 }
 
 void TSL2772::readALS_data(){
-	readRegister(TSL2722_C0DATA_REG, (uint8_t*) &_C0DATA, 2);
-	readRegister(TSL2722_C1DATA_REG, (uint8_t*) &_C1DATA, 2);
+	uint8_t data[4];
+	readRegister(TSL2722_C0DATA_REG | TSL27721_CMD_NORMAL, data, 4);
+
+	_C0DATA = data[1] << 8 | data[0];
+	_C1DATA = data[3] << 8 | data[2];
+
+//	readRegister(TSL2722_C0DATA_REG, (uint8_t*) &_C0DATA, 2);
+//	readRegister(TSL2722_C1DATA_REG, (uint8_t*) &_C1DATA, 2);
 }
 
 
@@ -271,12 +307,24 @@ bool TSL2772::writeRegister(uint8_t mem_addr, uint8_t *val,
 }
 
 bool TSL2772::writeRegisterByte(uint8_t mem_addr, uint8_t val) {
+	uint8_t data[2];
+
+	data[0] = mem_addr | CMD_REG_W;
+	data[1] = val;
+
 	if (HAL_OK
-			== HAL_I2C_Mem_Write(i2c_han, i2c_addr, mem_addr, 1, &val, 1, 10)) {
+			== HAL_I2C_Master_Transmit(i2c_han, i2c_addr, data, 2, 10)) {
 		return true;
 	} else {
 		return false;
 	}
+
+//	if (HAL_OK
+//			== HAL_I2C_Mem_Write(i2c_han, i2c_addr, mem_addr, 1, &val, 1, 10)) {
+//		return true;
+//	} else {
+//		return false;
+//	}
 }
 
 uint8_t TSL2772::modifyBitInByte(uint8_t var, uint8_t value,
@@ -321,7 +369,17 @@ bool TSL2772::modifyRegisterMultipleBit(uint16_t reg, uint8_t value,
 }
 
 uint8_t TSL2772::readRegisterByte(uint16_t mem_addr) {
-	uint8_t data;
-	HAL_I2C_Mem_Read(i2c_han, i2c_addr, mem_addr, 1, &data, 1, 10);
+	uint8_t data = 0;
+
+	if(HAL_OK != HAL_I2C_Mem_Read(i2c_han, i2c_addr, mem_addr, 1, &data, 1, 10)){
+		return 0;
+	}
 	return data;
+}
+
+bool TSL2772::readRegisterBytes(uint16_t mem_addr, uint8_t *data, uint16_t num_bytes) {
+	if(HAL_OK != HAL_I2C_Mem_Read(i2c_han, i2c_addr, mem_addr, 1, data, num_bytes, 10)){
+		return false;
+	}
+	return true;
 }
